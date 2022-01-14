@@ -1,6 +1,8 @@
 package misk.web.exceptions
 
 import com.google.common.util.concurrent.UncheckedExecutionException
+import com.squareup.moshi.JsonDataException
+import com.squareup.moshi.JsonEncodingException
 import com.squareup.wire.GrpcStatus
 import com.squareup.wire.ProtoAdapter
 import misk.Action
@@ -101,11 +103,16 @@ class ExceptionHandlingInterceptor(
     is UnauthorizedException -> UNAUTHORIZED_RESPONSE
     is InvocationTargetException -> toResponse(th.targetException)
     is UncheckedExecutionException -> toResponse(th.cause!!)
+    is JsonDataException -> BAD_REQUEST_RESPONSE(
+      "JSON does not match schema: " + (th.message?: "No further details"))
+    is JsonEncodingException -> BAD_REQUEST_RESPONSE(
+      "Invalid JSON supplied: " + (th.message?: "No further details"))
     else -> mapperResolver.mapperFor(th)?.let {
       log.log(it.loggingLevel(th), th) { "exception dispatching to $actionName" }
       it.toResponse(th)
     } ?: toInternalServerError(th)
   }
+
 
   private fun toGrpcResponse(th: Throwable): GrpcErrorResponse = when (th) {
     is UnauthenticatedException -> GrpcErrorResponse(GrpcStatus.UNAUTHENTICATED, th.message)
@@ -137,6 +144,12 @@ class ExceptionHandlingInterceptor(
 
   private companion object {
     val log = getLogger<ExceptionHandlingInterceptor>()
+
+    fun BAD_REQUEST_RESPONSE(message: String) = Response(
+      message.toResponseBody(),
+      listOf("Content-Type" to MediaTypes.TEXT_PLAIN_UTF8).toMap().toHeaders(),
+      HttpURLConnection.HTTP_BAD_REQUEST
+    )
 
     val INTERNAL_SERVER_ERROR_RESPONSE = Response(
       "internal server error".toResponseBody(),
